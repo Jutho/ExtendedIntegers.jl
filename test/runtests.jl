@@ -35,8 +35,9 @@ for k in 1:100000
     b = rand(UInt32)
     @test convert(F, widen(a)*widen(b)) == convert(F,a) * convert(F,b)
     # div
+for k in 1:10000
     a = rand(UInt64)
-    b = rand(UInt64)
+    b = rand(UInt32)
     @test map(F, divrem(a,b)) == divrem(convert(F,a), convert(F,b))
 end
 
