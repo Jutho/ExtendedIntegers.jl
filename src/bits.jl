@@ -2,8 +2,8 @@ using Base.BitUnsigned_types
 
 for U in BitUnsigned_types
     @eval begin
-        fullshift(::Type{$U}) = $(8*sizeof(U))
-        halfshift(::Type{$U}) = $(4*sizeof(U))
+        fullshift(::Type{$U}) = $(unsigned(8*sizeof(U)))
+        halfshift(::Type{$U}) = $(unsigned(4*sizeof(U)))
         halfmax(::Type{$U}) = $(typemax(U) >> 4*sizeof(U))
     end
 end

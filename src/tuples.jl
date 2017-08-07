@@ -15,30 +15,31 @@ using Base: front, tail, setindex
     _tcmp(t1::NTuple{N,U}, t2::NTuple{N,U}) where {N, U<:BitUnsigned} =
         t1[N] == t2[N] ? _tcmp(front(t1), front(t2)) : cmp(t1[N], t2[N])
 
+
+    _tfullleftshift(::Tuple{}) = ()
+    _tfullleftshift(t::NTuple{N,U}) where {N, U<:BitUnsigned} = (zero(U), front(t)...)
     _tleftshift(::Tuple{}, n::Unsigned) = ()
     _tleftshift(::Tuple{}, n::Unsigned, carry::BitUnsigned) = ()
     function _tleftshift(t::NTuple{N,U}, n::Unsigned) where {N, U<:BitUnsigned}
-        if n >= fullshift(U)
-            (zero(U), _tleftshift(front(t), n-fullshift(U))...)
-        elseif n == 0
-            t
-        else
-            (t[1] << n, _tleftshift(tail(t), n, t[1] >> (fullshift(U)-n))...)
+        while n >= fullshift(U)
+            t = _tfullleftshift(t)
+            n -= fullshift(U)
         end
+        n == 0 ? t : (t[1] << n, _tleftshift(tail(t), n, t[1] >> (fullshift(U)-n))...)
     end
     _tleftshift(t::NTuple{N,U}, n::Unsigned, carry::U) where {N, U<:BitUnsigned} =
         ((t[1] << n) | carry, _tleftshift(tail(t), n, t[1] >> (fullshift(U)-n))...)
 
+    _tfullrightshift(::Tuple{}) = ()
+    _tfullrightshift(t::NTuple{N,U}) where {N, U<:BitUnsigned} = (tail(t)..., zero(U))
     _trightshift(::Tuple{}, n::Unsigned) = ()
     _trightshift(::Tuple{}, n::Unsigned, carry::BitUnsigned) = ()
     function _trightshift(t::NTuple{N,U}, n::Unsigned) where {N, U<:BitUnsigned}
-        if n >= fullshift(U)
-            (_trightshift(tail(t), n-fullshift(U))..., zero(U))
-        elseif n == 0
-            t
-        else
-            (_trightshift(front(t), n, t[N] << (fullshift(U)-n))..., t[N] >> n)
+        while n >= fullshift(U)
+            t = _tfullrightshift(t)
+            n -= fullshift(U)
         end
+        n == 0 ? t : (_trightshift(front(t), n, t[N] << (fullshift(U)-n))..., t[N] >> n)
     end
     _trightshift(t::NTuple{N,U}, n::Unsigned, carry::U) where {N, U<:BitUnsigned} =
         (_trightshift(front(t), n, t[N] << (fullshift(U)-n))..., carry | (t[N] >> n))
@@ -86,26 +87,29 @@ using Base: front, tail, setindex
 
     _tmul(::Tuple{}, ::Tuple{}) = ()
     _tmul(::Tuple{}, a::U, carry::U = zero(U)) where {U<:BitUnsigned} = ()
-    function _tmul(t::NTuple{N,U}, a::U, carry::U = zero(U)) where {N, U<:BitUnsigned}
+    function _tmul(t::NTuple{N,U}, a::U, carry::U = zero(U)) where {N, U<:BitUnsigned}0
         t1, carry1 = _mul(t[1], a) # carry1 <= typemax - 2
         t1, carry2 = _add(t1, carry) # carry2 <= 1
         carry = carry1 + carry2 # cannot overflow
         (t1, _tmul(tail(t), a, carry)...)
     end
-    _tmul(t1::NTuple{N,U}, t2::NTuple{N,U}) where {N, U<:BitUnsigned} =
+    function _tmul(t1::NTuple{N,U}, t2::NTuple{N,U}) where {N, U<:BitUnsigned}
+        (all(iszero, t1) || all(iszero, t2)) && return _tzero(t1)
         _tadd(_tmul(t1, t2[1]), (zero(U), _tmul(front(t1), tail(t2))...))
+    end
 
     function _tdivrem(num::NTuple{N,U}, den::U) where {N, U<:BitUnsigned}
         iszero(den) && throw(DivideError())
-        all(iszero, tail(num)) && return divrem(num[1], den)
-
-        if num[N] >= den
+        if iszero(num[N])
+            qa, ra = _tdivrem(front(num), den)
+            return (qa..., zero(U)), (ra..., zero(U))
+        elseif num[N] >= den
             qN, rN = divrem(num[N], den)
-            q, r = _tdivrem2((front(num)..., rN), den)
-            return (q..., qN), (r..., zero(U))
+            qb, rb = _tdivrem2((front(num)..., rN), den)
+            return (qb..., qN), (rb..., zero(U))
         else
-            q, r = _tdivrem2(num, den)
-            return (q..., zero(U)), (r..., zero(U))
+            qc, rc = _tdivrem2(num, den)
+            return (qc..., zero(U)), (rc..., zero(U))
         end
     end
     function _tdivrem2(num::NTuple{N,U}, den::U) where {N, U<:BitUnsigned}
@@ -114,7 +118,6 @@ using Base: front, tail, setindex
         return (tq..., q), (tr..., zero(U))
     end
     _tdivrem2(num::Tuple{U,U}, den::U) where {U<:BitUnsigned} = map(tuple, _divrem(num[1], num[2], den))
-    _tdivrem2(num::Tuple{U}, den::U) where {U<:BitUnsigned} = map(tuple, divrem(num[1], den))
 
     _tdivrem(num::Tuple{}, den::Tuple{})  = (), ()
     function _tdivrem(num::NTuple{N,U}, den::NTuple{N,U}) where {N, U<:BitUnsigned}
@@ -127,15 +130,10 @@ using Base: front, tail, setindex
         while iszero(den[n])
             n-=1
         end
-
         s = unsigned(leading_zeros(den[n]))
         v = _tleftshift(den, s)
         u = _tleftshift((num..., zero(U)), s)
-        q, r = _tdivrem2(u, v, n)
-        return q, _trightshift(r, s)
-    end
-    function _tdivrem2(u::NTuple{M,U}, v::NTuple{N,U}, n) where {M, N, U<:BitUnsigned} # M = N+1
-        m = M
+        m = N+1
         while iszero(u[m])
             m-=1
         end
@@ -147,15 +145,16 @@ using Base: front, tail, setindex
         q = _tzero(v)
         for j = m:-1:0
             q̂ = _estimateq(u[j+n-1],u[j+n],u[j+n+1], v[n-1], v[n])
-            p = _tleftshift(_tmul((v..., zero(U)), q̂), unsigned(j*fullshift(U)))
+            vs = _tleftshift((v..., zero(U)), unsigned(j*fullshift(U)))
+            p = _tmul(vs, q̂)
             if _tcmp(p, u) > 0
                 q̂ -= one(q̂)
-                p = _tsub(p, _tleftshift((v..., zero(U)), unsigned(j*fullshift(U))))
+                p = _tsub(p, vs)
             end
             u = _tsub(u, p)
             q = Base.setindex(q, q̂, j+1)
-            # q = _tadd(q, _tleftshift(_tmul(_tone(q), q̂,), unsigned(j*fullshift(U))))
         end
-        return q, front(u)
+        r = _trightshift(front(u), s)
+        return q, r
     end
 end

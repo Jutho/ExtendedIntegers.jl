@@ -120,6 +120,7 @@ function _vsub!(y::Vector{U}, x::Vector{U}) where {U<:BitUnsigned}
     end
     return y
 end
+
 function _vmuladd!(y::Vector{U}, x1::Vector{U}, x2::Vector{U}) where {U<:BitUnsigned}
     while length(y) < length(x1)+length(x2)
         push!(y, zero(U))
